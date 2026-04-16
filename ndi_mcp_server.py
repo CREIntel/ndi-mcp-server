@@ -38,16 +38,36 @@ server = Server("northeast-deal-intel")
 
 # ─── HTTP helper ─────────────────────────────────────────────────────────────
 
+ACCESS_MSG = """\
+NDI_API_KEY not set or invalid.
+
+To use this MCP server, you need a Northeast Deal Intel API key:
+
+  🔑 Get instant access → https://northeastdealintel.com/agent-api.html
+
+TIERS:
+  Agent Starter  $49/mo  — search_deals, search_comps, get_sell_signal, owner lookup
+  Agent Pro      $149/mo — everything + score_deal (score any property), full comp access
+  Enterprise     $499/mo — all tools + API access for embedded agent workflows
+
+After purchase you'll receive your NDI_API_KEY by email.
+Add it to your MCP config:
+  { "env": { "NDI_API_KEY": "ndi_sk_..." } }
+
+Or call get_access() for full setup instructions.\
+"""
+
+
 def ndi_get(path: str, params: dict = None) -> dict:
     """Call the NDI API and return parsed JSON."""
     if not API_KEY:
-        return {"error": "NDI_API_KEY not set. Set it in your MCP environment config."}
+        return {"error": ACCESS_MSG}
     url = f"{API_BASE}{path}"
     headers = {"X-API-Key": API_KEY, "Accept": "application/json"}
     try:
         r = httpx.get(url, params=params or {}, headers=headers, timeout=30)
         if r.status_code == 403:
-            return {"error": "API key invalid or tier insufficient for this endpoint.", "status": 403}
+            return {"error": f"API key invalid or tier insufficient.\n\n{ACCESS_MSG}", "status": 403}
         if r.status_code == 429:
             return {"error": "Rate limit hit. Wait a moment and try again.", "status": 429}
         return r.json()
@@ -58,7 +78,7 @@ def ndi_get(path: str, params: dict = None) -> dict:
 def ndi_post(path: str, body: dict) -> dict:
     """POST to the NDI API."""
     if not API_KEY:
-        return {"error": "NDI_API_KEY not set."}
+        return {"error": ACCESS_MSG}
     url = f"{API_BASE}{path}"
     headers = {"X-API-Key": API_KEY, "Content-Type": "application/json"}
     try:
@@ -224,6 +244,24 @@ TOOLS = [
                 "state": {"type": "string", "description": "2-letter state code"},
             },
             "required": ["state"],
+        },
+    ),
+    Tool(
+        name="get_access",
+        description=(
+            "Get pricing, tier details, and setup instructions for the NDI MCP Server. "
+            "Call this if NDI_API_KEY is not set, if you need to upgrade your tier, "
+            "or if you want to explain to a user how to get access to NDI deal data."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "tier": {
+                    "type": "string",
+                    "description": "Optional: 'starter', 'pro', or 'enterprise' for tier-specific details",
+                },
+            },
+            "required": [],
         },
     ),
 ]
@@ -436,6 +474,86 @@ async def call_tool(name: str, arguments: dict):
         state = arguments["state"].upper()
         result = ndi_get("/v1/market/summary", {"state": state})
         return [TextContent(type="text", text=fmt(result))]
+
+    elif name == "get_access":
+        tier = (arguments.get("tier") or "").lower().strip()
+        tiers = {
+            "starter": {
+                "name": "Agent Starter",
+                "price": "$49/mo or $490/yr",
+                "tools": ["search_deals", "get_deal", "search_comps", "get_sell_signal",
+                          "get_market_benchmarks", "find_1031_candidates", "get_market_summary",
+                          "owner lookup (/v1/agent/owner-lookup)"],
+                "link": "https://buy.stripe.com/9B628r3OOde63KYdAo1ZS0m",
+            },
+            "pro": {
+                "name": "Agent Pro",
+                "price": "$149/mo or $1,490/yr",
+                "tools": ["All Starter tools", "score_deal (score any property not in our DB)",
+                          "full comp access (100K+ closed transactions)"],
+                "link": "https://buy.stripe.com/9B628r3OOde63KYdAo1ZS0m",
+            },
+            "enterprise": {
+                "name": "Enterprise",
+                "price": "$499/mo",
+                "tools": ["All Pro tools", "bulk export API", "custom comp reports",
+                          "embedded agent workflows", "dedicated support"],
+                "link": "https://northeastdealintel.com/agent-api.html",
+            },
+        }
+
+        if tier and tier in tiers:
+            t = tiers[tier]
+            lines = [
+                f"## {t['name']} — {t['price']}",
+                "",
+                "**Tools included:**",
+            ]
+            for tool in t["tools"]:
+                lines.append(f"  • {tool}")
+            lines += [
+                "",
+                f"**Get access:** {t['link']}",
+                "",
+                "After purchase you'll receive your NDI_API_KEY by email.",
+                "Add it to your MCP config: `{ \"env\": { \"NDI_API_KEY\": \"ndi_sk_...\" } }`",
+            ]
+        else:
+            lines = [
+                "## Northeast Deal Intel — MCP Server Access",
+                "",
+                "**14,000+ AI-scored CRE listings | 100,000+ closed comps | Northeast US**",
+                "",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                "",
+                "**Agent Starter — $49/mo**",
+                "  Tools: search_deals, get_deal, search_comps, get_sell_signal,",
+                "         get_market_benchmarks, find_1031_candidates, get_market_summary",
+                "  → https://buy.stripe.com/9B628r3OOde63KYdAo1ZS0m",
+                "",
+                "**Agent Pro — $149/mo**",
+                "  Everything in Starter + score_deal (score any property), full comp access",
+                "  → https://buy.stripe.com/9B628r3OOde63KYdAo1ZS0m",
+                "",
+                "**Enterprise — $499/mo**",
+                "  All Pro tools + bulk export, custom reports, embedded agent workflows",
+                "  → https://northeastdealintel.com/agent-api.html",
+                "",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                "",
+                "**How to set up:**",
+                "1. Purchase at the link above",
+                "2. Receive NDI_API_KEY by email",
+                "3. Add to MCP config:",
+                '   { "env": { "NDI_API_KEY": "ndi_sk_..." } }',
+                "4. Restart your MCP client (Claude Desktop, Cursor, etc.)",
+                "",
+                "**Docs:** https://northeastdealintel.com/agent-api.html",
+                "**GitHub:** https://github.com/CREIntel/ndi-mcp-server",
+                "",
+                "Questions? Email dave@northeastdealintel.com",
+            ]
+        return [TextContent(type="text", text="\n".join(lines))]
 
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
